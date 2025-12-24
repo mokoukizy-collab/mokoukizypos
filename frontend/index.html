@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chill Bar 點餐</title>
+  <style>
+    :root{ --primary:#00e5ff; --accent:#ffd54f; --danger:#d32f2f; --bg:#0d0d0f; --card:#151518; --text:#e0e0e0; }
+    body{font-family:"Microsoft JhengHei UI",system-ui; margin:0; background:var(--bg); color:var(--text); }
+    .nav{padding:16px 20px; background:linear-gradient(90deg,#1a237e,#0d47a1); color:#fff; font-weight:800; letter-spacing:1px;}
+    .container{padding:12px 16px; max-width:960px; margin:0 auto;}
+    .chips{display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;}
+    .chip{padding:8px 14px; border-radius:999px; background:#263238; color:#90caf9; border:1px solid #3949ab; cursor:pointer; user-select:none;}
+    .chip.active{background:#3949ab; color:#fff; border-color:#5c6bc0;}
+    .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px;}
+    .card{background:var(--card); border-radius:16px; padding:12px; box-shadow:0 6px 18px rgba(0,0,0,.45); overflow:hidden; border:1px solid #212121;}
+    .card h4{margin:0 0 8px 0;}
+    .card img{width:100%; height:140px; object-fit:cover; border-radius:10px; margin-bottom:8px;}
+    .desc{font-size:14px; opacity:.9; margin-bottom:8px;}
+    .qty{display:flex; align-items:center; gap:6px; justify-content:flex-end;}
+    .btn{padding:10px 14px; border:none; border-radius:8px; cursor:pointer; color:#000;}
+    .btn.primary{background:var(--primary); color:#00171f;}
+    .btn.danger{background:var(--danger); color:#fff;}
+    .bar{display:flex; gap:8px; align-items:center; justify-content:space-between; margin-top:16px;}
+    .note{width:100%; height:96px; border-radius:8px; border:1px solid #424242; background:#1f1f23; color:var(--text); padding:10px;}
+    .hidden{display:none;}
+    .inline{display:inline-block;}
+    .label{font-weight:600;}
+    .input{padding:8px 10px; border:1px solid #424242; border-radius:8px; background:#1f1f23; color:var(--text);}
+    .sum{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;}
+    .flex{display:flex; align-items:center; gap:8px;}
+    .muted{color:#bdbdbd;}
+  </style>
+</head>
+<body>
+  <div class="nav">Chill Bar 行動點餐</div>
+  <div class="container">
+    <div class="chips">
+      <div class="chip active" data-scene="內用">內用</div>
+      <div class="chip" data-scene="外帶">外帶</div>
+      <div class="chip" data-scene="外送">外送</div>
+    </div>
+    <div id="tableBox">
+      <span class="label">桌號</span>
+      <input id="tableNo" class="input" type="number" min="1" placeholder="請輸入桌號">
+    </div>
+    <div class="grid" id="menu"></div>
+    <div class="sum" id="summary"></div>
+    <textarea id="note" class="note" placeholder="備註（例如：不加辣、飯少一點）"></textarea>
+    <div class="bar">
+      <button id="clear" class="btn danger">清空</button>
+      <button id="submit" class="btn primary">送出訂單</button>
+    </div>
+    <div id="result"></div>
+  </div>
+  <script>
+    const API_BASE = location.origin;
+    let menu = [];
+    let descriptions = {};
+    async function loadMenu(){
+      try{
+        const r = await fetch(`${API_BASE}/api/config`);
+        const data = await r.json();
+        if(Array.isArray(data.menu)){ menu = data.menu; } else { menu = []; }
+        descriptions = data.descriptions || {};
+      }catch(e){
+        menu = [
+          {name:"舒肥里肌餐盒", price:125},
+          {name:"舒肥雞腿餐盒", price:160},
+          {name:"品名較長的舒肥里肌餐盒", price:142},
+        ];
+        descriptions = {};
+      }
+    }
+    const selected = new Map(); // name -> {unit_price, quantity, details}
+    const menuEl = document.getElementById("menu");
+    const summaryEl = document.getElementById("summary");
+    const noteEl = document.getElementById("note");
+    const tableBox = document.getElementById("tableBox");
+    const tableNoEl = document.getElementById("tableNo");
+    const sceneElts = Array.from(document.querySelectorAll(".chip"));
+    let scene = "內用";
+    sceneElts.forEach(ch => ch.addEventListener("click", () => {
+      sceneElts.forEach(x => x.classList.remove("active"));
+      ch.classList.add("active");
+      scene = ch.dataset.scene;
+      tableBox.classList.toggle("hidden", scene !== "內用");
+    }));
+    function renderMenu(){
+      menuEl.innerHTML = "";
+      menu.forEach((item, idx) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        const img = document.createElement("img");
+        const n = idx+1;
+        const candidates = [
+          `${API_BASE}/assets/u${n}.jpeg`,
+          `${API_BASE}/assets/u${n}.jpg`,
+          `${API_BASE}/static/images/u${n}.jpeg`,
+          `${API_BASE}/static/images/u${n}.jpg`,
+        ];
+        img.src = candidates[0];
+        img.onerror = function(){
+          const next = candidates.shift();
+          if(candidates.length>0) img.src = candidates[0];
+        };
+        const h4 = document.createElement("h4");
+        h4.textContent = item.name;
+        const price = document.createElement("div");
+        price.textContent = "$ " + item.price;
+        const desc = document.createElement("div");
+        desc.className = "desc";
+        desc.textContent = descriptions[n] || "";
+        const detail = document.createElement("input");
+        detail.placeholder = "特殊要求（選填）";
+        detail.className = "input";
+        detail.style.width = "100%";
+        detail.addEventListener("input", () => {
+          const cur = selected.get(item.name);
+          if(cur){ cur.details = detail.value; }
+        });
+        const qty = document.createElement("div");
+        qty.className = "qty";
+        const minus = document.createElement("button");
+        minus.className = "btn";
+        minus.textContent = "−";
+        const count = document.createElement("span");
+        count.textContent = "0";
+        const plus = document.createElement("button");
+        plus.className = "btn";
+        plus.textContent = "+";
+        minus.onclick = () => {
+          const cur = selected.get(item.name);
+          if(cur){
+            cur.quantity = Math.max(0, cur.quantity-1);
+            if(cur.quantity===0){ selected.delete(item.name); }
+          }
+          count.textContent = selected.get(item.name)?.quantity || 0;
+          renderSummary();
+        };
+        plus.onclick = () => {
+          const cur = selected.get(item.name) || {unit_price:item.price, quantity:0, details:""};
+          cur.quantity += 1;
+          selected.set(item.name, cur);
+          count.textContent = cur.quantity;
+          renderSummary();
+        };
+        qty.append(minus, count, plus);
+        card.append(img, h4, price, desc, detail, qty);
+        menuEl.appendChild(card);
+      });
+    }
+    function renderSummary(){
+      let subtotal = 0, count = 0;
+      summaryEl.innerHTML = "";
+      selected.forEach((v,k) => {
+        subtotal += v.unit_price * v.quantity;
+        count += v.quantity;
+        const line = document.createElement("div");
+        line.textContent = `${k} x${v.quantity} @$${v.unit_price}` + (v.details?` ｜ ${v.details}`:"");
+        summaryEl.appendChild(line);
+      });
+      const total = subtotal;
+      const info = document.createElement("div");
+      info.textContent = `小計：${subtotal}　合計：${total}　數量：${count}`;
+      summaryEl.appendChild(info);
+      // 暫存於元素屬性，送單時使用
+      summaryEl.dataset.subtotal = String(subtotal);
+      summaryEl.dataset.total = String(total);
+    }
+    document.getElementById("clear").onclick = () => { selected.clear(); renderSummary(); renderMenu(); };
+    document.getElementById("submit").onclick = async () => {
+      const items = Array.from(selected.entries()).map(([name, v]) => ({
+        name, unit_price: v.unit_price, quantity: v.quantity, details: v.details||""
+      })).filter(x => x.quantity>0);
+      if(items.length===0){ alert("請選擇餐點"); return; }
+      if(scene==="內用"){
+        const tno = Number(tableNoEl.value||0);
+        if(!tno || tno<1){ alert("請輸入桌號"); return; }
+      }
+      const payload = {
+        dine_type: scene,
+        table_no: scene==="內用" ? Number(tableNoEl.value||0) : null,
+        note: noteEl.value||"",
+        subtotal: Number(summaryEl.dataset.subtotal||0),
+        discount: 0,
+        allowance: 0,
+        total: Number(summaryEl.dataset.total||0),
+        items
+      };
+      try{
+        const r = await fetch(`${API_BASE}/api/orders`, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+        if(r.status===409){ alert("桌號有人，請重新輸入"); return; }
+        const data = await r.json();
+        document.getElementById("result").textContent = `建立成功，訂單編號：${data.id}` + (payload.note?`（備註已送出）`:"");
+        alert("訂單已送出 請耐心等待");
+        selected.clear(); renderSummary(); renderMenu(); noteEl.value=""; tableNoEl.value="";
+      }catch(e){
+        alert("送出失敗，請稍後再試");
+      }
+    };
+    (async()=>{ await loadMenu(); renderMenu(); renderSummary(); })();
+    tableBox.classList.toggle("hidden", scene !== "內用");
+  </script>
+</body>
+</html>
